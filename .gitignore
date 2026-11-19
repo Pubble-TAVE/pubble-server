@@ -39,6 +39,8 @@ out/
 
 ### Yml / Yaml ###
 *.yml
+!.github/workflows/*.yml
+!src/main/resources/application.yml
 *.yaml
 
 ### Env ###

@@ -1,0 +1,54 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [ develop ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build jar
+        run: |
+          chmod +x gradlew
+          ./gradlew bootJar -x test
+
+      - name: Prepare SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/key.pem
+          chmod 600 ~/.ssh/key.pem
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Create env file
+        run: |
+          cat > pubble.env <<'EOF'
+          DB_URL='${{ secrets.DB_URL }}'
+          DB_USERNAME='${{ secrets.DB_USERNAME }}'
+          DB_PASSWORD='${{ secrets.DB_PASSWORD }}'
+          EOF
+
+      - name: Upload files to EC2
+        run: |
+          cp build/libs/*.jar pubble-server.jar
+          scp -i ~/.ssh/key.pem pubble-server.jar pubble.env \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/
+
+      - name: Restart app
+        run: |
+          ssh -i ~/.ssh/key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            if [ -f pubble.pid ]; then
+              kill $(cat pubble.pid) 2>/dev/null || true
+              sleep 5
+            fi
+            set -a; . ./pubble.env; set +a
+            nohup java -Xmx512m -jar pubble-server.jar > app.log 2>&1 < /dev/null &
+            echo $! > pubble.pid
+          EOF
